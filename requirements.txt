@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+requests
+shapely
+pyproj
+reportlab
+pydantic
+lxml
