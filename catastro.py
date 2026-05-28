@@ -11,7 +11,6 @@ def leer_poslists(root):
         if elem.tag.endswith("posList") and elem.text:
 
             valores = elem.text.split()
-
             puntos = []
 
             for i in range(0, len(valores), 2):
@@ -49,52 +48,70 @@ def buscar_refcat_por_direccion(
         "Puerta": ""
     }
 
-    respuesta = requests.get(
-        url,
-        params=params,
-        timeout=20
-    )
-
-    if respuesta.status_code != 200:
-
-        raise Exception(
-            f"Error Catastro dirección HTTP {respuesta.status_code}"
-        )
-
-    contenido = respuesta.content.strip()
-
-    if not contenido.startswith(b"<"):
-
-        raise Exception(
-            "Catastro no devolvió XML válido."
-        )
-
-    try:
-
-        root = ET.fromstring(contenido)
-
-    except ET.ParseError:
-
-        print(respuesta.text[:1000])
-
-        raise Exception(
-            "Error parseando XML del Catastro."
-        )
-
-    ns = {
-        "cat": "http://www.catastro.meh.es/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 OFV-Planos-Catastro/1.0",
+        "Accept": "application/xml,text/xml,*/*"
     }
 
-    pc1 = root.find(".//cat:pc1", ns)
-    pc2 = root.find(".//cat:pc2", ns)
+    ultimo_error = None
 
-    if pc1 is None or pc2 is None:
+    for intento in range(3):
 
-        raise Exception(
-            "No se encontró referencia catastral para la dirección."
-        )
+        try:
 
-    return pc1.text + pc2.text
+            respuesta = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=30
+            )
+
+            if respuesta.status_code != 200:
+
+                ultimo_error = (
+                    f"HTTP {respuesta.status_code}"
+                )
+
+                continue
+
+            contenido = respuesta.content.strip()
+
+            if not contenido.startswith(b"<"):
+
+                ultimo_error = (
+                    "Respuesta no XML del Catastro"
+                )
+
+                continue
+
+            root = ET.fromstring(contenido)
+
+            ns = {
+                "cat": "http://www.catastro.meh.es/"
+            }
+
+            pc1 = root.find(".//cat:pc1", ns)
+            pc2 = root.find(".//cat:pc2", ns)
+
+            if pc1 is None or pc2 is None:
+
+                raise Exception(
+                    "No se encontró referencia catastral para la dirección."
+                )
+
+            return pc1.text + pc2.text
+
+        except requests.exceptions.RequestException as e:
+
+            ultimo_error = str(e)
+
+        except ET.ParseError as e:
+
+            ultimo_error = f"Error XML: {e}"
+
+    raise Exception(
+        f"No se pudo consultar la dirección en Catastro. Último error: {ultimo_error}"
+    )
 
 
 def obtener_parcela_principal(refcat):
@@ -110,7 +127,11 @@ def obtener_parcela_principal(refcat):
         "srsname": "EPSG::25831"
     }
 
-    respuesta = requests.get(url, params=params)
+    respuesta = requests.get(
+        url,
+        params=params,
+        timeout=30
+    )
 
     root = ET.fromstring(respuesta.content)
 
@@ -142,7 +163,8 @@ def obtener_geometrias_bbox(
 
     respuesta = requests.get(
         url,
-        params=params
+        params=params,
+        timeout=30
     )
 
     root = ET.fromstring(
@@ -178,11 +200,15 @@ def obtener_datos_plano(
     alto_util_mm = alto_a4_mm - margen_mm * 2
 
     ancho_real_m = (
-        ancho_util_mm * escala_mayor_ambito / 1000
+        ancho_util_mm
+        * escala_mayor_ambito
+        / 1000
     )
 
     alto_real_m = (
-        alto_util_mm * escala_mayor_ambito / 1000
+        alto_util_mm
+        * escala_mayor_ambito
+        / 1000
     )
 
     min_x = centro_x - ancho_real_m / 2
