@@ -3,16 +3,22 @@ import xml.etree.ElementTree as ET
 
 
 def leer_poslists(root):
+
     geometrias = []
 
     for elem in root.iter():
+
         if elem.tag.endswith("posList") and elem.text:
+
             valores = elem.text.split()
+
             puntos = []
 
             for i in range(0, len(valores), 2):
+
                 x = float(valores[i])
                 y = float(valores[i + 1])
+
                 puntos.append((x, y))
 
             if len(puntos) >= 3:
@@ -28,13 +34,14 @@ def buscar_refcat_por_direccion(
     nombre_via,
     numero
 ):
+
     url = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPLOC"
 
     params = {
-        "Provincia": provincia,
-        "Municipio": municipio,
-        "Sigla": tipo_via,
-        "Calle": nombre_via,
+        "Provincia": provincia.upper(),
+        "Municipio": municipio.upper(),
+        "Sigla": tipo_via.upper(),
+        "Calle": nombre_via.upper(),
         "Numero": numero,
         "Bloque": "",
         "Escalera": "",
@@ -42,21 +49,56 @@ def buscar_refcat_por_direccion(
         "Puerta": ""
     }
 
-    respuesta = requests.get(url, params=params)
-    root = ET.fromstring(respuesta.content)
+    respuesta = requests.get(
+        url,
+        params=params,
+        timeout=20
+    )
 
-    ns = {"cat": "http://www.catastro.meh.es/"}
+    if respuesta.status_code != 200:
+
+        raise Exception(
+            f"Error Catastro dirección HTTP {respuesta.status_code}"
+        )
+
+    contenido = respuesta.content.strip()
+
+    if not contenido.startswith(b"<"):
+
+        raise Exception(
+            "Catastro no devolvió XML válido."
+        )
+
+    try:
+
+        root = ET.fromstring(contenido)
+
+    except ET.ParseError:
+
+        print(respuesta.text[:1000])
+
+        raise Exception(
+            "Error parseando XML del Catastro."
+        )
+
+    ns = {
+        "cat": "http://www.catastro.meh.es/"
+    }
 
     pc1 = root.find(".//cat:pc1", ns)
     pc2 = root.find(".//cat:pc2", ns)
 
     if pc1 is None or pc2 is None:
-        raise Exception("No se ha encontrado referencia catastral para esa dirección.")
+
+        raise Exception(
+            "No se encontró referencia catastral para la dirección."
+        )
 
     return pc1.text + pc2.text
 
 
 def obtener_parcela_principal(refcat):
+
     url = "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx"
 
     params = {
@@ -69,17 +111,26 @@ def obtener_parcela_principal(refcat):
     }
 
     respuesta = requests.get(url, params=params)
+
     root = ET.fromstring(respuesta.content)
 
     parcelas = leer_poslists(root)
 
     if not parcelas:
-        raise Exception("No se encontró la parcela principal")
+
+        raise Exception(
+            "No se encontró parcela principal."
+        )
 
     return parcelas[0]
 
 
-def obtener_geometrias_bbox(url, typename, bbox):
+def obtener_geometrias_bbox(
+    url,
+    typename,
+    bbox
+):
+
     params = {
         "service": "WFS",
         "version": "2.0.0",
@@ -89,14 +140,26 @@ def obtener_geometrias_bbox(url, typename, bbox):
         "bbox": bbox
     }
 
-    respuesta = requests.get(url, params=params)
-    root = ET.fromstring(respuesta.content)
+    respuesta = requests.get(
+        url,
+        params=params
+    )
+
+    root = ET.fromstring(
+        respuesta.content
+    )
 
     return leer_poslists(root)
 
 
-def obtener_datos_plano(refcat, escalas):
-    parcela_principal = obtener_parcela_principal(refcat)
+def obtener_datos_plano(
+    refcat,
+    escalas
+):
+
+    parcela_principal = obtener_parcela_principal(
+        refcat
+    )
 
     escala_mayor_ambito = max(escalas)
 
@@ -108,23 +171,38 @@ def obtener_datos_plano(refcat, escalas):
 
     ancho_a4_mm = 297
     alto_a4_mm = 210
+
     margen_mm = 12
 
     ancho_util_mm = ancho_a4_mm - margen_mm * 2
     alto_util_mm = alto_a4_mm - margen_mm * 2
 
-    ancho_real_m = ancho_util_mm * escala_mayor_ambito / 1000
-    alto_real_m = alto_util_mm * escala_mayor_ambito / 1000
+    ancho_real_m = (
+        ancho_util_mm * escala_mayor_ambito / 1000
+    )
+
+    alto_real_m = (
+        alto_util_mm * escala_mayor_ambito / 1000
+    )
 
     min_x = centro_x - ancho_real_m / 2
     max_x = centro_x + ancho_real_m / 2
+
     min_y = centro_y - alto_real_m / 2
     max_y = centro_y + alto_real_m / 2
 
-    bbox = f"{min_x},{min_y},{max_x},{max_y},EPSG:25831"
+    bbox = (
+        f"{min_x},{min_y},"
+        f"{max_x},{max_y},EPSG:25831"
+    )
 
-    url_parcelas = "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx"
-    url_edificios = "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx"
+    url_parcelas = (
+        "https://ovc.catastro.meh.es/INSPIRE/wfsCP.aspx"
+    )
+
+    url_edificios = (
+        "https://ovc.catastro.meh.es/INSPIRE/wfsBU.aspx"
+    )
 
     parcelas = obtener_geometrias_bbox(
         url=url_parcelas,
