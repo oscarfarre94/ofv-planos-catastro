@@ -27,7 +27,6 @@ def generar_plano(data: PlanoRequest):
 
     if not refcat:
         if not all([
-            data.provincia,
             data.municipio,
             data.tipo_via,
             data.nombre_via,
@@ -39,7 +38,7 @@ def generar_plano(data: PlanoRequest):
             )
 
         refcat = buscar_refcat_por_direccion(
-            provincia=data.provincia,
+            provincia="",
             municipio=data.municipio,
             tipo_via=data.tipo_via,
             nombre_via=data.nombre_via,
