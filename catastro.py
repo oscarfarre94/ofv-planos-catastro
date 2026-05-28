@@ -164,7 +164,7 @@ def obtener_geometrias_bbox(
     respuesta = requests.get(
         url,
         params=params,
-        timeout=30
+        timeout=90
     )
 
     root = ET.fromstring(
