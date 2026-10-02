@@ -134,13 +134,37 @@ def obtener_parcela_principal(refcat):
     return parcelas[0]
 
 
-def obtener_geometrias_bbox(url, typename, bbox):
+def obtener_geometrias_bbox(url, typename, bbox, _nivel=0):
     params = {
         "service": "WFS", "version": "2.0.0", "request": "GetFeature",
         "typenames": typename, "srsname": "EPSG::25831", "bbox": bbox,
     }
-    root = _consultar_xml(url, params)
-    return leer_poslists(root)
+    try:
+        root = _consultar_xml(url, params)
+        return leer_poslists(root)
+    except CatastroError as exc:
+        # Divide únicamente el error explícito de extensión, nunca un fallo de red.
+        if "area of extension out of limits" not in str(exc).lower() or _nivel >= 4:
+            raise
+        partes = bbox.split(",")
+        min_x, min_y, max_x, max_y = map(float, partes[:4])
+        crs = partes[4] if len(partes) > 4 else "EPSG:25831"
+        if max_x - min_x >= max_y - min_y:
+            medio = (min_x + max_x) / 2
+            regiones = [(min_x, min_y, medio, max_y), (medio, min_y, max_x, max_y)]
+        else:
+            medio = (min_y + max_y) / 2
+            regiones = [(min_x, min_y, max_x, medio), (min_x, medio, max_x, max_y)]
+        resultado = []
+        vistos = set()
+        for region in regiones:
+            sub_bbox = ",".join(map(str, region)) + "," + crs
+            for geometria in obtener_geometrias_bbox(url, typename, sub_bbox, _nivel + 1):
+                clave = tuple(geometria)
+                if clave not in vistos:
+                    vistos.add(clave)
+                    resultado.append(geometria)
+        return resultado
 
 
 def obtener_datos_plano(
