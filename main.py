@@ -1,13 +1,23 @@
 from typing import Optional
+from pathlib import Path
+import logging
+import re
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from catastro import obtener_datos_plano, buscar_refcat_por_direccion
+from catastro import CatastroError, obtener_datos_plano, buscar_refcat_por_direccion
 from pdf_generator import generar_pdf
 
 app = FastAPI(title="OFV Planos Catastro API")
+
+
+@app.exception_handler(CatastroError)
+async def error_catastro(request, exc):
+    logging.getLogger(__name__).warning("Error de Catastro: %s", exc)
+    headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
+    return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)}, headers=headers)
 
 
 class PlanoRequest(BaseModel):
@@ -23,10 +33,16 @@ class PlanoRequest(BaseModel):
 @app.post("/generar-plano-catastral")
 def generar_plano(data: PlanoRequest):
 
-    refcat = data.referencia_catastral
+    refcat = (data.referencia_catastral or "").strip().upper()
+    if data.escala is not None and data.escala <= 0:
+        raise HTTPException(status_code=400, detail="La escala debe ser un entero positivo.")
+    if refcat and not re.fullmatch(r"(?:[A-Z0-9]{14}|[A-Z0-9]{18}|[A-Z0-9]{20})", refcat):
+        raise HTTPException(status_code=400, detail="La referencia catastral debe tener 14, 18 o 20 caracteres alfanuméricos.")
+    # El plano corresponde a una parcela; los caracteres finales identifican inmuebles.
+    refcat = refcat[:14]
 
     if not refcat:
-        if not all([
+        if not all(str(valor or "").strip() for valor in [
             data.provincia,
             data.municipio,
             data.tipo_via,
@@ -46,7 +62,7 @@ def generar_plano(data: PlanoRequest):
             numero=data.numero
         )
 
-    escalas = [data.escala] if data.escala else [500, 2000]
+    escalas = [data.escala] if data.escala is not None else [500, 2000]
 
     datos = obtener_datos_plano(
         refcat=refcat,
@@ -71,7 +87,11 @@ def generar_plano(data: PlanoRequest):
 @app.get("/descargar/{filename}")
 def descargar_pdf(filename: str):
 
-    path = f"outputs/{filename}"
+    if not re.fullmatch(r"[A-Z0-9]{14}\.pdf", filename):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado.")
+    path = Path("outputs") / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="El PDF no existe o ha caducado. Genera el plano de nuevo.")
 
     return FileResponse(
         path,
